@@ -30,7 +30,7 @@ All traffic go through the mediator as a proxy, a burden for the proxy server, w
 
 How to use?
 ----
-Can use the project as a standalone application or embed your application.
+Can use the project as a standalone application or be embed in your java application.
 TODO wiki
 
 Features:
