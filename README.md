@@ -4,7 +4,7 @@ The motive power of this project is there is one problem we want to solve:
 <br>
 How could we make a C/S application (server application bind on a port, client application connect to that port) still work in an Internet environment? The server is located in a machine of LAN A, while the client is located in a machine of LAN B, both the server machine and the client machine have no public ip, so they can not ping each other, but they have the access to the Internet, so they are physically connected with each other indirectly, so how could let the client can talk to the server directly just like in the same LAN?
 <br>
-There are several known solutions for this problem, like NAT, virtual LAN, etc.., they solve this solution in the underline network layers, is it possible to solve this problem in the application layer in an easy understanding way?
+There are several known solutions for this problem, like NAT, virtual LAN, etc.., they solve this solution in the underline network layers, have some requirement on the network devices or environment, is it possible to solve this problem in the application layer, less dependent?
 
 What is your solution?
 ----
