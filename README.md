@@ -1,4 +1,4 @@
-Why you need this:
+Why need this:
 ----
 The motive power of this project is there is one problem we want to solve:
 <br>
@@ -6,13 +6,13 @@ How could we make a C/S application (server application bind on a port, client a
 <br>
 There are several known solutions for this problem, like NAT, virtual LAN, etc.., they solve this solution in the underline network layers, have some requirement on the network devices or environment, is it possible to solve this problem in the application layer, less dependent?
 
-What is your solution?
+What is the solution?
 ----
 We create a shadow port for the client in the same LAN(or machine), this shadow port will act exactly as the real port which the server listen to, the client is just like connecting to a server locally. A pipe across the internet is build up between the shadow port and the real port.
 
 That's enough for the users of this project to understand the solution, for people who care about the implementation, you can go ahead.
 
-How you achieve that?
+How to achieve that?
 ----
 Here are our solution in a tecnical way:
 Set up:<br>
