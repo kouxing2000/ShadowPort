@@ -30,10 +30,10 @@ All traffic go through the mediator as a proxy, a burden for the proxy server, w
 
 How to use?
 ----
-Can use the project as a standalone application or be embed in your java application.
+Can use the project as a standalone application or be embed in your java application.<BR>
 TODO wiki
 
 Features:
 ----
-Support several clients and severs connect to the same mediator.
+Support several clients and severs connect to the same mediator.<BR>
 Dynamic configuration for the port mappings.
