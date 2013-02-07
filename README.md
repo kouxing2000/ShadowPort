@@ -14,7 +14,7 @@ That's enough for the users of this project to understand the solution, for peop
 
 How to achieve that?
 ----
-Here are our solution in a tecnical way:
+Here are our solution in a tecnical way:<br>
 Set up:<br>
 A mediator run on a machine with open IP, which can be accessed both by client machine and server machine.
 On the client side (same LAN or machine), run a Virtual server, real client connect Virtual server.
