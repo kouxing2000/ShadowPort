@@ -17,8 +17,26 @@ public class MediatorConfiguration implements Serializable {
 	 * MappingEntry<VirtualPort, RealPort>
 	 */
 	private List<MappingEntry> portMappings;
+	
+	private boolean usingSSLForDataConnection = false;
+
+	private String signalHost;
+	private int signalPort; 
+	private String dataHost; 
+	private int dataPort; 
+	private String publicDataHost = null;
+	private int publicDataPort = -1;
+	private int minimalIdleDataConnections = 5;
 
 	public MediatorConfiguration() {
+	}
+
+	public MediatorConfiguration(String signalHost, int signalPort, String dataHost, int dataPort) {
+		super();
+		this.signalHost = signalHost;
+		this.signalPort = signalPort;
+		this.dataHost = dataHost;
+		this.dataPort = dataPort;
 	}
 
 	public MediatorConfiguration addMapping(MappingEntry entry) {
@@ -34,7 +52,25 @@ public class MediatorConfiguration implements Serializable {
 	@Override
 	public String toString() {
 		StringBuilder builder = new StringBuilder();
-		builder.append("MediatorConfiguration [portMappings=").append(portMappings).append("]");
+		builder.append("MediatorConfiguration [portMappings=");
+		builder.append(portMappings);
+		builder.append(", usingSSLForDataConnection=");
+		builder.append(usingSSLForDataConnection);
+		builder.append(", signalHost=");
+		builder.append(signalHost);
+		builder.append(", signalPort=");
+		builder.append(signalPort);
+		builder.append(", dataHost=");
+		builder.append(dataHost);
+		builder.append(", dataPort=");
+		builder.append(dataPort);
+		builder.append(", publicDataHost=");
+		builder.append(publicDataHost);
+		builder.append(", publicDataPort=");
+		builder.append(publicDataPort);
+		builder.append(", minimalIdleDataConnections=");
+		builder.append(minimalIdleDataConnections);
+		builder.append("]");
 		return builder.toString();
 	}
 
@@ -69,4 +105,83 @@ public class MediatorConfiguration implements Serializable {
 		}
 		return result;
 	}
+	
+
+	public String getSignalHost() {
+		return signalHost;
+	}
+
+	public MediatorConfiguration setSignalHost(String signalHost) {
+		this.signalHost = signalHost;
+		return this;
+	}
+
+	public int getSignalPort() {
+		return signalPort;
+	}
+
+	public MediatorConfiguration setSignalPort(int signalPort) {
+		this.signalPort = signalPort;
+		return this;
+	}
+
+	public String getDataHost() {
+		return dataHost;
+	}
+
+	public MediatorConfiguration setDataHost(String dataHost) {
+		this.dataHost = dataHost;
+		return this;
+	}
+
+	public int getDataPort() {
+		return dataPort;
+	}
+
+	public MediatorConfiguration setDataPort(int dataPort) {
+		this.dataPort = dataPort;
+		return this;
+	}
+
+	public String getPublicDataHost() {
+		return publicDataHost != null ? publicDataHost : dataHost;
+	}
+
+	public MediatorConfiguration setPublicDataHost(String publicDataHost) {
+		this.publicDataHost = publicDataHost;
+		return this;
+	}
+
+	public int getPublicDataPort() {
+		return publicDataPort > 0 ? publicDataPort : dataPort;
+	}
+
+	public MediatorConfiguration setPublicDataPort(int publicDataPort) {
+		this.publicDataPort = publicDataPort;
+		return this;
+	}
+
+	public MediatorConfiguration setPortMappings(List<MappingEntry> portMappings) {
+		this.portMappings = portMappings;
+		return this;
+	}
+
+	public boolean isUsingSSLForDataConnection() {
+		return usingSSLForDataConnection;
+	}
+
+	public MediatorConfiguration setUsingSSLForDataConnection(boolean usingSSLForDataConnection) {
+		this.usingSSLForDataConnection = usingSSLForDataConnection;
+		return this;
+	}
+	
+	public int getMinimalIdleDataConnections() {
+		return minimalIdleDataConnections;
+	}
+
+	public MediatorConfiguration setMinimalIdleDataConnections(int minimalIdleDataConnections) {
+		this.minimalIdleDataConnections = minimalIdleDataConnections;
+		return this;
+	}
+
 }

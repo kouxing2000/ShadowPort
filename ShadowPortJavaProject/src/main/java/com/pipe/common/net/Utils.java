@@ -1,5 +1,6 @@
 package com.pipe.common.net;
 
+import java.util.Arrays;
 import java.util.List;
 
 import org.jboss.netty.channel.Channel;
@@ -18,8 +19,8 @@ public class Utils {
 			logger.debug("bridge " + channel_a + " - " + channel_b);
 		}
 		
-		channel_b.getPipeline().addLast("handler", new ProxyHandler(channel_a));
-		channel_a.getPipeline().addLast("handler", new ProxyHandler(channel_b));
+		channel_b.getPipeline().addLast("bridger", new ProxyHandler(channel_a));
+		channel_a.getPipeline().addLast("bridger", new ProxyHandler(channel_b));
 		
 	}
 	
@@ -44,6 +45,15 @@ public class Utils {
 		List<String> names = pipeline.getNames();
 		for (String name : names) {
 			pipeline.remove(name);
+		}
+	}
+	
+	public static final void clearAllHandlersExcept(ChannelPipeline pipeline, String... excludeNames){
+		List<String> names = pipeline.getNames();
+		for (String name : names) {
+			if (Arrays.binarySearch(excludeNames, name) < 0){
+				pipeline.remove(name);
+			}
 		}
 	}
 }

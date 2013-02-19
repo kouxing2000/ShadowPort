@@ -26,17 +26,20 @@ public class JoinResponse implements Serializable{
 	
 	private int dataConnectionPort;
 	
+	private boolean usingSSLForDataConnection;
+
 	public JoinResponse() {
 	}
 
 	public JoinResponse(boolean accept, String dataConnectionKey, int minimalDurableDataConnectionNum,
-			String dataConnectionHost, int dataConnectionPort) {
+			String dataConnectionHost, int dataConnectionPort, boolean usingSSLForDataConnection) {
 		super();
 		this.accept = accept;
 		this.dataConnectionKey = dataConnectionKey;
 		this.minimalDurableDataConnectionNum = minimalDurableDataConnectionNum;
 		this.dataConnectionHost = dataConnectionHost;
 		this.dataConnectionPort = dataConnectionPort;
+		this.usingSSLForDataConnection = usingSSLForDataConnection;
 	}
 
 	public boolean isAccept() {
@@ -79,13 +82,30 @@ public class JoinResponse implements Serializable{
 		this.dataConnectionPort = dataConnectionPort;
 	}
 
+	public void setUsingSSLForDataConnection(boolean usingSSLForDataConnection) {
+		this.usingSSLForDataConnection = usingSSLForDataConnection;
+	}
+
+	public boolean isUsingSSLForDataConnection() {
+		return usingSSLForDataConnection;
+	}
+
 	@Override
 	public String toString() {
 		StringBuilder builder = new StringBuilder();
-		builder.append("JoinResponse [accept=").append(accept).append(", dataConnectionKey=").append(dataConnectionKey)
-				.append(", minimalDurableDataConnectionNum=").append(minimalDurableDataConnectionNum)
-				.append(", dataConnectionHost=").append(dataConnectionHost).append(", dataConnectionPort=")
-				.append(dataConnectionPort).append("]");
+		builder.append("JoinResponse [accept=");
+		builder.append(accept);
+		builder.append(", dataConnectionKey=");
+		builder.append(dataConnectionKey);
+		builder.append(", minimalDurableDataConnectionNum=");
+		builder.append(minimalDurableDataConnectionNum);
+		builder.append(", dataConnectionHost=");
+		builder.append(dataConnectionHost);
+		builder.append(", dataConnectionPort=");
+		builder.append(dataConnectionPort);
+		builder.append(", usingSSLForDataConnection=");
+		builder.append(usingSSLForDataConnection);
+		builder.append("]");
 		return builder.toString();
 	}
 	

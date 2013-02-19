@@ -11,6 +11,8 @@ import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
+import javax.net.ssl.SSLEngine;
+
 import org.jboss.netty.bootstrap.ClientBootstrap;
 import org.jboss.netty.bootstrap.ServerBootstrap;
 import org.jboss.netty.channel.Channel;
@@ -25,6 +27,7 @@ import org.jboss.netty.channel.MessageEvent;
 import org.jboss.netty.channel.SimpleChannelUpstreamHandler;
 import org.jboss.netty.channel.socket.nio.NioClientSocketChannelFactory;
 import org.jboss.netty.channel.socket.nio.NioServerSocketChannelFactory;
+import org.jboss.netty.handler.ssl.SslHandler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -36,11 +39,17 @@ import com.pipe.common.net.message.DataConnectionReleasedMessage;
 import com.pipe.common.net.message.JoinRequest;
 import com.pipe.common.net.message.JoinResponse;
 import com.pipe.common.net.message.OpenVirtualPortMessage;
+import com.pipe.common.net.ssl.PipeSslContextFactory;
 import com.pipe.common.service.PeerType;
 
 public class VirtualPeer {
-	
+
+	private static final String SSL_HANDLER_NAME = "ssl";
+
 	protected final Logger logger = LoggerFactory.getLogger(getClass());
+
+	// read from JoinResponse
+	private boolean usingSSL;
 
 	private final String mediatorHost;
 	private final int mediatorPort;
@@ -99,8 +108,8 @@ public class VirtualPeer {
 			}
 		}
 
-		//TODO if no free channel
-		
+		// TODO if no free channel
+
 		return null;
 	}
 
@@ -108,7 +117,7 @@ public class VirtualPeer {
 	public String toString() {
 		return super.toString() + "-" + id + "\n" + connectionsPool;
 	}
-	
+
 	private ExecutorService executor;
 
 	public void start() {
@@ -194,6 +203,8 @@ public class VirtualPeer {
 	private Map<InetSocketAddress, OpenVirtualPortMessage> portMapping = new HashMap<InetSocketAddress, OpenVirtualPortMessage>();
 
 	protected void createDataConnections() {
+		
+		usingSSL = joinResponse.isUsingSSLForDataConnection();
 
 		// create data connection pool
 		final InetSocketAddress remoteAddress = new InetSocketAddress(joinResponse.getDataConnectionHost(),
@@ -203,7 +214,7 @@ public class VirtualPeer {
 			ChannelFuture dataConnectionFuture = clientBootstrap.connect(remoteAddress);
 			Channel channel = dataConnectionFuture.getChannel();
 
-			dataConnectionPreparedForUsage(channel);
+			dataConnectionInitialledForUsage(channel);
 			final String connectionId = "con_" + i;
 
 			dataConnectionFuture.addListener(new ChannelFutureListener() {
@@ -228,11 +239,26 @@ public class VirtualPeer {
 
 	}
 
-	protected void dataConnectionPreparedForUsage(Channel channel) {
+	protected void dataConnectionInitialledForUsage(Channel channel) {
 
 		ChannelPipeline pipeline = channel.getPipeline();
 
-		Utils.clearAllHandlers(pipeline);
+		if (usingSSL) {
+			SSLEngine engine = PipeSslContextFactory.getClientContext().createSSLEngine();
+			engine.setUseClientMode(true);
+			pipeline.addLast(SSL_HANDLER_NAME, new SslHandler(engine));
+		}
+
+		Utils.addCodec(pipeline);
+
+		addDectectConnectionCreatedHandler(pipeline);
+	}
+
+	protected void dataConnectionRecycledForUsage(Channel channel) {
+
+		ChannelPipeline pipeline = channel.getPipeline();
+
+		Utils.clearAllHandlersExcept(pipeline, SSL_HANDLER_NAME);
 
 		Utils.addCodec(pipeline);
 
@@ -241,13 +267,41 @@ public class VirtualPeer {
 
 	protected void addDectectConnectionCreatedHandler(ChannelPipeline pipeline) {
 		pipeline.addLast("connection_open_intercept", new SimpleChannelUpstreamHandler() {
+
+			@Override
+			public void channelConnected(ChannelHandlerContext ctx, ChannelStateEvent e) throws Exception {
+
+				if (usingSSL) {
+					// Get the SslHandler in the current pipeline.
+					// We added it in SecureChatPipelineFactory.
+					final SslHandler sslHandler = ctx.getPipeline().get(SslHandler.class);
+
+					// Get notified when SSL handshake is done.
+					ChannelFuture handshakeFuture = sslHandler.handshake();
+					handshakeFuture.addListener(new ChannelFutureListener() {
+
+						@Override
+						public void operationComplete(ChannelFuture future) throws Exception {
+							if (future.isSuccess()) {
+								logger.info("handshake success");
+							} else {
+								logger.error("handshake failed, close connection!");
+								future.getChannel().close();
+							}
+						}
+					});
+				}
+				
+				super.channelConnected(ctx, e);
+			}
+
 			@Override
 			public void messageReceived(ChannelHandlerContext ctx, MessageEvent e) throws Exception {
-				
+
 				final Channel dataChannel = e.getChannel();
 
 				dataChannel.setReadable(false);
-				
+
 				Object messageObject = e.getMessage();
 
 				if (messageObject instanceof DataConnectionEmployedMessage) {
@@ -256,8 +310,7 @@ public class VirtualPeer {
 
 					logger.info("data channel " + dataChannel + " first receive :" + messageObject);
 
-					final InetSocketAddress remoteAddress = new InetSocketAddress(dem.getRealHost(), dem
-							.getRealPort());
+					final InetSocketAddress remoteAddress = new InetSocketAddress(dem.getRealHost(), dem.getRealPort());
 					ChannelFuture connect = clientBootstrap.connect(remoteAddress);
 
 					connect.addListener(new ChannelFutureListener() {
@@ -268,13 +321,14 @@ public class VirtualPeer {
 								ChannelHolder channelHolder = getHolderByDataChannel(dataChannel);
 								channelHolder.setPipedChannel(future.getChannel());
 
-								Utils.clearAllHandlers(dataChannel.getPipeline());
+								Utils.clearAllHandlersExcept(dataChannel.getPipeline(), SSL_HANDLER_NAME);
+
 								Utils.clearAllHandlers(future.getChannel().getPipeline());
 								Utils.bridge(future.getChannel(), dataChannel);
 
 								future.getChannel().getPipeline()
 										.addLast("disconnect_listener", getRealConnectionDisconnectHandler());
-								
+
 								dataChannel.setReadable(true);
 							} else {
 								logger.error("Error, failed to connect to " + remoteAddress);
@@ -291,22 +345,22 @@ public class VirtualPeer {
 	}
 
 	public void stop() {
-		if (signalChannel.isConnected()){
+		if (signalChannel.isConnected()) {
 			ChannelFuture closeFuture = signalChannel.close();
 			closeFuture.awaitUninterruptibly(1000);
 		}
-		
-		for (ChannelHolder handler : connectionsPool){
+
+		for (ChannelHolder handler : connectionsPool) {
 			handler.getChannel().close();
 		}
-		
+
 		connectionsPool.clear();
-		
+
 		portMapping.clear();
-		
+
 		serverBootstrap.releaseExternalResources();
 		clientBootstrap.releaseExternalResources();
-		
+
 		executor.shutdown();
 	}
 
@@ -324,19 +378,19 @@ public class VirtualPeer {
 			@Override
 			public void childChannelClosed(ChannelHandlerContext ctx, ChildChannelStateEvent e) throws Exception {
 				notifyRemote(e.getChannel());
-				
+
 				super.childChannelClosed(ctx, e);
 			}
 
 			protected void notifyRemote(final Channel channel) {
-				
+
 				executor.execute(new Runnable() {
-					
+
 					@Override
 					public void run() {
 						ChannelHolder channelHolder = getHolderByPipedChannel(channel);
 
-						//let channel dead normally
+						// let channel dead normally
 						try {
 							Thread.sleep(600);
 						} catch (InterruptedException e) {
@@ -349,11 +403,11 @@ public class VirtualPeer {
 						// notify remote part to disconnect too
 						sendMessage(signalChannel, new DataConnectionReleasedMessage(channelHolder.getConnectionId()));
 
-						//recycle the data connection
-						dataConnectionPreparedForUsage(channelHolder.getChannel());
+						// recycle the data connection
+						dataConnectionRecycledForUsage(channelHolder.getChannel());
 					}
 				});
-				
+
 			}
 
 		};
@@ -366,21 +420,19 @@ public class VirtualPeer {
 	}
 
 	protected void onMessage(DataConnectionReleasedMessage drm) {
-		//TODO need change, if peer can match to several other peers
 		ChannelHolder dataChannelHolder = getHolderByID(drm.getConnectionId());
-		
+
 		Utils.clearAllHandlers(dataChannelHolder.getPipedChannel().getPipeline());
 
 		dataChannelHolder.getPipedChannel().disconnect();
 
 		dataChannelHolder.setPipedChannel(null);
 
-		dataConnectionPreparedForUsage(dataChannelHolder.getChannel());
+		dataConnectionRecycledForUsage(dataChannelHolder.getChannel());
 	}
-	
+
 	protected void onMessage(OpenVirtualPortMessage ovpm) {
-		InetSocketAddress virtualAddress = new InetSocketAddress(ovpm.getVirtualHost(), ovpm
-				.getVirtualPort());
+		InetSocketAddress virtualAddress = new InetSocketAddress(ovpm.getVirtualHost(), ovpm.getVirtualPort());
 
 		portMapping.put(virtualAddress, ovpm);
 
@@ -390,7 +442,7 @@ public class VirtualPeer {
 	protected void addOnConnectionFromClientOpenHandler(ChannelPipeline pipeline) {
 		pipeline.addLast("connection_open_notify", new SimpleChannelUpstreamHandler() {
 
-			//?? why childChannelOpen not work
+			// ?? why childChannelOpen not work
 			@Override
 			public void channelConnected(ChannelHandlerContext ctx, ChannelStateEvent e) throws Exception {
 				final Channel realChannel = e.getChannel();
@@ -409,28 +461,28 @@ public class VirtualPeer {
 						.getRealHost(), openVirtualPortMessage.getRealPort());
 
 				ChannelHolder freeChannelHolder = getFreeChannel();
-				
-				if (freeChannelHolder != null){
+
+				if (freeChannelHolder != null) {
 
 					final Channel dataChannel = freeChannelHolder.getChannel();
-	
+
 					freeChannelHolder.setPipedChannel(realChannel);
-	
+
 					ChannelFuture writeFuture = sendMessage(dataChannel, dem);
-	
+
 					writeFuture.addListener(new ChannelFutureListener() {
-	
+
 						@Override
 						public void operationComplete(ChannelFuture future) throws Exception {
 							if (future.isSuccess()) {
-	
-								Utils.clearAllHandlers(dataChannel.getPipeline());
+
+								Utils.clearAllHandlersExcept(dataChannel.getPipeline(), SSL_HANDLER_NAME);
 								Utils.clearAllHandlers(realChannel.getPipeline());
 								Utils.bridge(dataChannel, realChannel);
-	
-								//??
+
+								// ??
 								Thread.sleep(100);
-								
+
 								// let the new traffic in
 								realChannel.setReadable(true);
 							} else {
@@ -446,7 +498,7 @@ public class VirtualPeer {
 			}
 		});
 	}
-	
+
 	public static void main(String[] args) throws Exception {
 		// Print usage if no argument is specified.
 		if (args.length < 3) {
@@ -458,7 +510,7 @@ public class VirtualPeer {
 		final String id = args[0];
 		final String mediatorHost = args[1];
 		final int mediatorPort = Integer.parseInt(args[2]);
-		
+
 		VirtualPeer vp = new VirtualPeer(id, mediatorHost, mediatorPort);
 		vp.start();
 	}

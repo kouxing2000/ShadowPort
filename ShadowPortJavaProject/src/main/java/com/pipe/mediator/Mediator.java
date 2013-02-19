@@ -19,6 +19,7 @@ import java.util.concurrent.TimeUnit;
 
 import javax.management.MBeanServer;
 import javax.management.ObjectName;
+import javax.net.ssl.SSLEngine;
 
 import org.jboss.netty.bootstrap.ServerBootstrap;
 import org.jboss.netty.channel.Channel;
@@ -32,6 +33,7 @@ import org.jboss.netty.channel.Channels;
 import org.jboss.netty.channel.MessageEvent;
 import org.jboss.netty.channel.SimpleChannelUpstreamHandler;
 import org.jboss.netty.channel.socket.nio.NioServerSocketChannelFactory;
+import org.jboss.netty.handler.ssl.SslHandler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -46,13 +48,17 @@ import com.pipe.common.net.message.DataConnectionReleasedMessage;
 import com.pipe.common.net.message.JoinRequest;
 import com.pipe.common.net.message.JoinResponse;
 import com.pipe.common.net.message.OpenVirtualPortMessage;
+import com.pipe.common.net.ssl.PipeSslContextFactory;
 import com.pipe.common.service.PeerType;
 
 public class Mediator implements MediatorMBean {
+	private static final String SSL_HANDLER_NAME = "ssl";
 
 	private static final Logger logger = LoggerFactory.getLogger(Mediator.class);
 
-	private static final int DEFAULT_MINIMAL_DATA_CONNECTION_NUM = 7;
+	private final boolean usingSSLForDataConnection;
+
+	private final int minimalIdleDataConnections;
 
 	private final String signalHost;
 	private final int signalPort;
@@ -73,29 +79,18 @@ public class Mediator implements MediatorMBean {
 
 	private static final ScheduledExecutorService SCHEDULED_EXECUTOR_SERVICE = Executors.newScheduledThreadPool(2);
 
-	public Mediator(String signalHost, int signalPort, String dataHost, int dataPort) {
-		this(signalHost, signalPort, dataHost, dataPort, null);
-	}
-
-	public Mediator(String signalHost, int signalPort, String dataHost, int dataPort, MediatorConfiguration mc) {
-		this(signalHost, signalPort, dataHost, dataPort, dataHost, dataPort, mc);
-	}
-
-	public Mediator(String signalHost, int signalPort, String dataHost, int dataPort, String publicDataHost,
-			int publicDataPort, MediatorConfiguration mc) {
+	public Mediator(MediatorConfiguration mc) {
 		super();
-		this.signalHost = signalHost;
-		this.signalPort = signalPort;
-		this.dataHost = dataHost;
-		this.dataPort = dataPort;
-		this.publicDataHost = publicDataHost;
-		this.publicDataPort = publicDataPort;
-
-		if (mc != null) {
-			this.mediatorConfiguration = mc;
-		} else {
-			this.mediatorConfiguration = new MediatorConfiguration();
-		}
+		//TODO verify configuration items
+		this.mediatorConfiguration = mc;
+		this.signalHost = mc.getSignalHost();
+		this.signalPort = mc.getSignalPort();
+		this.dataHost = mc.getDataHost();
+		this.dataPort = mc.getDataPort();
+		this.publicDataHost = mc.getPublicDataHost();
+		this.publicDataPort = mc.getPublicDataPort();
+		this.minimalIdleDataConnections = mc.getMinimalIdleDataConnections();
+		this.usingSSLForDataConnection = mc.isUsingSSLForDataConnection();
 	}
 
 	/**
@@ -140,6 +135,7 @@ public class Mediator implements MediatorMBean {
 		ServerBootstrap signalBootstrap = new ServerBootstrap(channelFactory);
 
 		// Set up the pipeline factory.
+		//TODO for siganl connection, force to use SSL
 		signalBootstrap.setPipelineFactory(new ChannelPipelineFactory() {
 			public ChannelPipeline getPipeline() throws Exception {
 				ChannelPipeline pipeline = Channels.pipeline();
@@ -166,7 +162,8 @@ public class Mediator implements MediatorMBean {
 							onPeerJoined(peerHolder);
 
 							sendMessage(remoteSignalChannel, new JoinResponse(true, dataConnectionKey,
-									DEFAULT_MINIMAL_DATA_CONNECTION_NUM, publicDataHost, publicDataPort));
+									minimalIdleDataConnections, publicDataHost, publicDataPort,
+									usingSSLForDataConnection));
 
 							remoteSignalChannel.getPipeline().addLast("disconnect_handler",
 									new SimpleChannelUpstreamHandler() {
@@ -238,9 +235,42 @@ public class Mediator implements MediatorMBean {
 
 				ChannelPipeline pipeline = pipeline();
 
+				if (usingSSLForDataConnection) {
+					SSLEngine engine = PipeSslContextFactory.getServerContext().createSSLEngine();
+					engine.setUseClientMode(false);
+					pipeline.addLast(SSL_HANDLER_NAME, new SslHandler(engine));
+				}
+
 				Utils.addCodec(pipeline);
 
 				pipeline.addLast("data_connection_come", new SimpleChannelUpstreamHandler() {
+
+					@Override
+					public void channelConnected(ChannelHandlerContext ctx, ChannelStateEvent e) throws Exception {
+
+						if (usingSSLForDataConnection) {
+							// Get the SslHandler in the current pipeline.
+							// We added it in SecureChatPipelineFactory.
+							final SslHandler sslHandler = ctx.getPipeline().get(SslHandler.class);
+
+							// Get notified when SSL handshake is done.
+							ChannelFuture handshakeFuture = sslHandler.handshake();
+							handshakeFuture.addListener(new ChannelFutureListener() {
+
+								@Override
+								public void operationComplete(ChannelFuture future) throws Exception {
+									if (future.isSuccess()) {
+										logger.info("handshake success");
+									} else {
+										logger.error("handshake failed, close connection!");
+										future.getChannel().close();
+									}
+								}
+							});
+						}
+
+						super.channelConnected(ctx, e);
+					}
 
 					@Override
 					public void messageReceived(ChannelHandlerContext ctx, MessageEvent e) throws Exception {
@@ -375,8 +405,8 @@ public class Mediator implements MediatorMBean {
 
 		connection.setPipedChannel(coupledConnection.getChannel());
 		coupledConnection.setPipedChannel(connection.getPipedChannel());
-		Utils.clearAllHandlers(connection.getChannel().getPipeline());
-		Utils.clearAllHandlers(coupledConnection.getChannel().getPipeline());
+		Utils.clearAllHandlersExcept(connection.getChannel().getPipeline(), SSL_HANDLER_NAME);
+		Utils.clearAllHandlersExcept(coupledConnection.getChannel().getPipeline(), SSL_HANDLER_NAME);
 		Utils.bridge(connection.getChannel(), coupledConnection.getChannel());
 
 		DataConnectionEntry entry = new DataConnectionEntry(peer.getPeerID(), peerConnectionID);
@@ -436,7 +466,7 @@ public class Mediator implements MediatorMBean {
 
 	}
 
-	//TODO more test
+	// TODO more test
 	protected synchronized void onPeerLeft(PeerHolder peer) {
 
 		// clear existPortMappings
@@ -446,8 +476,7 @@ public class Mediator implements MediatorMBean {
 				.hasNext();) {
 			Entry<PeerPortEntry, PeerPortEntry> mapping = iterator.next();
 
-			if (peerID.equals(mapping.getKey().getPeerID())
-					|| peerID.equals(mapping.getValue().getPeerID())) {
+			if (peerID.equals(mapping.getKey().getPeerID()) || peerID.equals(mapping.getValue().getPeerID())) {
 				iterator.remove();
 				logger.info("remove port mapping {} -> {}", mapping.getKey(), mapping.getValue());
 			}
@@ -473,13 +502,13 @@ public class Mediator implements MediatorMBean {
 					coupledPeer.recycleConnection(coupledEntry.getConnectionID());
 				}
 				logger.info("recycle pipe {} <-> {}", pipeEntry, coupledEntry);
-			} else if (peerID.equals(pipe.getValue().getPeerID())){
+			} else if (peerID.equals(pipe.getValue().getPeerID())) {
 				iterator.remove();
 				logger.info("recycle pipe {} <-> {}", pipeEntry, pipe.getValue());
 			}
 
 		}
-		
+
 		allPeers.remove(peerID);
 
 	}
@@ -595,42 +624,18 @@ public class Mediator implements MediatorMBean {
 		}
 
 		// Print usage if no argument is specified.
-		if (args.length < 4) {
-			System.err
-					.println("Usage: <mediator_host> <mediator_port> <data_host> <data_port> (<public_data_host> <public_data_port> <config_file_path>)");
+		if (args.length < 1) {
+			System.err.println("Usage: config_file_path");
 			return;
 		}
 
-		// Parse options.
-		final String mediatorHost = args[0];
-		final int mediatorPort = Integer.parseInt(args[1]);
-		final String dataHost = args[2];
-		final int dataPort = Integer.parseInt(args[3]);
-		String publicDataHost = dataHost;
-		int publicDataPort = dataPort;
+		String filePath = args[0];
 
-		MediatorConfiguration mediatorConfiguration = null;
-		String filePath = null;
-		if (args.length == 5) {
-			filePath = args[4];
-		}
+		System.out.println("Parse config file:" + filePath);
+		MediatorConfiguration mediatorConfiguration = gson.fromJson(new FileReader(filePath),
+				MediatorConfiguration.class);
 
-		if (args.length >= 6) {
-			publicDataHost = args[4];
-			publicDataPort = Integer.parseInt(args[5]);
-
-			if (args.length >= 7) {
-				filePath = args[6];
-			}
-		}
-
-		if (filePath != null) {
-			System.out.println("Parse config file:" + filePath);
-			mediatorConfiguration = gson.fromJson(new FileReader(filePath), MediatorConfiguration.class);
-		}
-
-		Mediator m = new Mediator(mediatorHost, mediatorPort, dataHost, dataPort, publicDataHost, publicDataPort,
-				mediatorConfiguration);
+		Mediator m = new Mediator(mediatorConfiguration);
 		m.start();
 
 		System.out.println("mediator is started");

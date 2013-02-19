@@ -8,6 +8,7 @@ import com.pipe.virtual.client.VirtualClient;
 import com.pipe.virtual.peer.VirtualPeer;
 import com.pipe.virtual.server.VirtualServer;
 
+//TODO change to unit test format
 public class Test {
 
 	/**
@@ -17,7 +18,7 @@ public class Test {
 
 //		 testClient2Server();
 
-//		 testClient2VirtualServer2Mediator2VirtualClient2Server();
+		 testClient2VirtualServer2Mediator2VirtualClient2Server();
 
 //		 virtualServer2Mediator2VirtualClient();
 
@@ -29,7 +30,7 @@ public class Test {
 		
 //		testClient2Pipe2Server();
 		
-		setUpVirtualClientAndServer();
+//		setUpVirtualClientAndServer();
 
 	}
 
@@ -41,10 +42,10 @@ public class Test {
 	protected static void testClient2Server() {
 		String host = "localhost";
 		int port = 9999;
-		new EchoServer(host, port).run();
+		new EchoServer(host, port).setUsingSSL(true).run();
 
 		int firstMessageSize = 100;
-		new EchoClient(host, port, firstMessageSize).run();
+		new EchoClient(host, port, firstMessageSize).setUsingSSL(true).run();
 	}
 
 	/**
@@ -71,7 +72,7 @@ public class Test {
 
 		int dataPort = 7777;
 
-		Mediator mediator = new Mediator(mediatorHost, mediatorPort, mediatorHost, dataPort);
+		Mediator mediator = new Mediator(new MediatorConfiguration(mediatorHost, mediatorPort, mediatorHost, dataPort).setUsingSSLForDataConnection(true));
 		mediator.start();
 
 		// virtual client, virtual server build the pipe through the mediator
@@ -132,7 +133,7 @@ public class Test {
 
 		int dataPort = 7777;
 
-		Mediator mediator = new Mediator(mediatorHost, mediatorPort, mediatorHost, dataPort);
+		Mediator mediator = new Mediator(new MediatorConfiguration(mediatorHost, mediatorPort, mediatorHost, dataPort));
 		mediator.start();
 
 		// virtual client, virtual server build the pipe through the mediator
@@ -183,8 +184,7 @@ public class Test {
 		MappingEntry entry = new MappingEntry(new PeerPortEntry("vs1", virtualServerHost, virtualServerPort),
 				new PeerPortEntry("vc1", serverHost, serverPort));
 
-		Mediator mediator = new Mediator(mediatorHost, mediatorPort, mediatorHost, dataPort,
-				new MediatorConfiguration().addMapping(entry));
+		Mediator mediator = new Mediator(new MediatorConfiguration(mediatorHost, mediatorPort, mediatorHost, dataPort).addMapping(entry));
 		mediator.start();
 
 		try {
@@ -227,7 +227,7 @@ public class Test {
 
 		int dataPort = 7777;
 
-		Mediator mediator = new Mediator(mediatorHost, mediatorPort, mediatorHost, dataPort);
+		Mediator mediator = new Mediator(new MediatorConfiguration(mediatorHost, mediatorPort, mediatorHost, dataPort));
 		mediator.start();
 
 		// virtual client, virtual server build the pipe through the mediator
@@ -326,7 +326,7 @@ public class Test {
 
 		int dataPort = 7777;
 
-		Mediator mediator = new Mediator(mediatorHost, mediatorPort, mediatorHost, dataPort);
+		Mediator mediator = new Mediator(new MediatorConfiguration(mediatorHost, mediatorPort, mediatorHost, dataPort));
 		mediator.start();
 
 		// virtual client, virtual server build the pipe through the mediator

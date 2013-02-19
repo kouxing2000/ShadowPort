@@ -17,13 +17,29 @@ package com.pipe.real;
 
 import java.net.InetSocketAddress;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.logging.Level;
+import java.util.logging.Logger;
+
+import javax.net.ssl.SSLEngine;
 
 import org.jboss.netty.bootstrap.ClientBootstrap;
+import org.jboss.netty.buffer.ChannelBuffer;
+import org.jboss.netty.buffer.ChannelBuffers;
 import org.jboss.netty.channel.ChannelFuture;
+import org.jboss.netty.channel.ChannelFutureListener;
+import org.jboss.netty.channel.ChannelHandlerContext;
 import org.jboss.netty.channel.ChannelPipeline;
 import org.jboss.netty.channel.ChannelPipelineFactory;
+import org.jboss.netty.channel.ChannelStateEvent;
 import org.jboss.netty.channel.Channels;
+import org.jboss.netty.channel.ExceptionEvent;
+import org.jboss.netty.channel.MessageEvent;
+import org.jboss.netty.channel.SimpleChannelUpstreamHandler;
 import org.jboss.netty.channel.socket.nio.NioClientSocketChannelFactory;
+import org.jboss.netty.handler.ssl.SslHandler;
+
+import com.pipe.common.net.ssl.PipeSslContextFactory;
 
 /**
  * Sends one message when a connection is open and echoes back any received data
@@ -33,14 +49,28 @@ import org.jboss.netty.channel.socket.nio.NioClientSocketChannelFactory;
  */
 public class EchoClient {
 
+	private static final Logger logger = Logger.getLogger(EchoClient.class.getName());
+
 	private final String host;
 	private final int port;
 	private final int firstMessageSize;
+	private final ChannelBuffer firstMessage;
 
 	public EchoClient(String host, int port, int firstMessageSize) {
 		this.host = host;
 		this.port = port;
 		this.firstMessageSize = firstMessageSize;
+		firstMessage = ChannelBuffers.buffer(firstMessageSize);
+		for (int i = 0; i < firstMessage.capacity(); i++) {
+			firstMessage.writeByte((byte) i);
+		}
+	}
+
+	private boolean usingSSL;
+
+	public EchoClient setUsingSSL(boolean usingSSL) {
+		this.usingSSL = usingSSL;
+		return this;
 	}
 
 	public void run() {
@@ -51,7 +81,94 @@ public class EchoClient {
 		// Set up the pipeline factory.
 		bootstrap.setPipelineFactory(new ChannelPipelineFactory() {
 			public ChannelPipeline getPipeline() throws Exception {
-				return Channels.pipeline(new EchoClientHandler(firstMessageSize));
+
+				ChannelPipeline pipeline = Channels.pipeline();
+
+				if (usingSSL) {
+					SSLEngine engine = PipeSslContextFactory.getClientContext().createSSLEngine();
+					engine.setUseClientMode(true);
+					pipeline.addLast("ssl", new SslHandler(engine));
+				}
+
+				pipeline.addLast("echo", new SimpleChannelUpstreamHandler() {
+
+					private final AtomicLong transferredBytes = new AtomicLong();
+
+					@Override
+					public void channelConnected(final ChannelHandlerContext ctx, final ChannelStateEvent e)
+							throws Exception {
+						if (usingSSL) {
+							// Get the SslHandler from the pipeline
+							// which were added in SecureChatPipelineFactory.
+							SslHandler sslHandler = ctx.getPipeline().get(SslHandler.class);
+
+							// Begin handshake.
+							ChannelFuture handshakeFuture = sslHandler.handshake();
+							handshakeFuture.addListener(new ChannelFutureListener() {
+
+								@Override
+								public void operationComplete(ChannelFuture future) throws Exception {
+									if (future.isSuccess()) {
+										logger.info("handshake success");
+
+										startSend(ctx, e);
+									} else {
+										future.getChannel().close();
+									}
+								}
+
+							});
+						} else {
+							startSend(ctx, e);
+						}
+
+					}
+
+					private void startSend(final ChannelHandlerContext ctx, final ChannelStateEvent e) {
+						// Send the first message. Server will not
+						// send anything here
+						// because the firstMessage's capacity is 0.
+						e.getChannel().write(firstMessage);
+						startTime = System.currentTimeMillis();
+						System.out.println(ctx.getChannel() + " send first message " + firstMessage);
+					}
+
+					private long startTime = 0;
+
+					@Override
+					public void messageReceived(ChannelHandlerContext ctx, MessageEvent e) {
+
+						// TODO verify back message
+
+						// Send back the received message to the remote peer.
+						transferredBytes.addAndGet(((ChannelBuffer) e.getMessage()).readableBytes());
+
+						System.out.println("Client " + ctx.getChannel() + " - Count:" + transferredBytes.get());
+
+						if (transferredBytes.get() % firstMessageSize == 0) {
+							System.out.println("it takes " + (System.currentTimeMillis() - startTime)
+									+ " ms for message echo back!");
+
+							try {
+								Thread.sleep(1000);
+							} catch (InterruptedException e1) {
+								e1.printStackTrace();
+							}
+
+							e.getChannel().write(e.getMessage());
+							startTime = System.currentTimeMillis();
+						}
+
+					}
+
+					@Override
+					public void exceptionCaught(ChannelHandlerContext ctx, ExceptionEvent e) {
+						// Close the connection when an exception is raised.
+						logger.log(Level.WARNING, "Unexpected exception from downstream.", e.getCause());
+						e.getChannel().close();
+					}
+				});
+				return pipeline;
 			}
 		});
 
@@ -59,10 +176,10 @@ public class EchoClient {
 		ChannelFuture future = bootstrap.connect(new InetSocketAddress(host, port));
 
 		// Wait until the connection is closed or the connection attempt fails.
-		//future.getChannel().getCloseFuture().awaitUninterruptibly();
+		// future.getChannel().getCloseFuture().awaitUninterruptibly();
 
 		// Shut down thread pools to exit.
-		//bootstrap.releaseExternalResources();
+		// bootstrap.releaseExternalResources();
 	}
 
 	public static void main(String[] args) throws Exception {
