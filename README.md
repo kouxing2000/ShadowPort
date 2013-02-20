@@ -17,13 +17,13 @@ How to achieve that?
 Here are our solution in a tecnical way:<br>
 Set up:<br>
 A mediator run on a machine with open IP, which can be accessed both by client machine and server machine.
-On the client side (same LAN or machine), run a Virtual server, real client connect Virtual server.
-On the server side (same LAN or machine), run a Virtual client, Virtual client connect to the real server
-Virtual cleint, Virtual server build the connections with mediator.
+On the client side (same LAN or machine), run a stub program (as a virtual server), real client connect virtual server.
+On the server side (same LAN or machine), run a stub program (as a virtual client), virtual client connect to the real server
+both stub program build the connections to mediator.
 
 Run time:<br>
-When client send request, request go through Virtual server to mediator to Virtual client, fianlly to server,
-after server processed, send back the response, it go through Virtual client to mediator to Virtual server，finally back to client.
+When client send request, request go through stub(virtual server) to mediator to stub(virtual client), fianlly to server,
+after server processed, send back the response, it go through stub(virtual client) to mediator to stub(virtual server)，finally back to client.
 
 NOTE&&TODO:<br>
 All traffic go through the mediator as a proxy, a burden for the proxy server, we can use some technique like pole punching to let Virtual server and Virtual client communicate with each other directly after the hand shaking is over.
@@ -31,9 +31,11 @@ All traffic go through the mediator as a proxy, a burden for the proxy server, w
 How to use?
 ----
 Can use the project as a standalone application or be embed in your java application.<BR>
-TODO wiki
+Refer to the sample application and unit tests.
 
 Features:
 ----
-Support several clients and severs connect to the same mediator.<BR>
-Dynamic configuration for the port mappings.
+Support several stubs connect to the same mediator.<BR>
+Support configuring virtual port mappings on the fly.<BR>
+Support SSL connections between stubs and mediator. <BR>
+Support another simple solution for simple network environment, only one component is needed, the Proxy! It must be able to access to the real server directly. <BR>
