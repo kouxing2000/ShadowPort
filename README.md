@@ -8,7 +8,7 @@ There are several known solutions for this problem, like NAT, virtual LAN, etc..
 
 What is the solution?
 ----
-We create a shadow port for the client in the same LAN(or machine), this shadow port will act exactly as the real port which the server listen to, the client is just like connecting to a server locally. A pipe across the internet is build up between the shadow port and the real port.
+We create a <B>shadow port</B> for the client in the same LAN(or machine), this shadow port will act exactly as the real port which the server listen to, the client is just like connecting to a server locally. A <B>pipe</B> across the internet is build up between the shadow port and the real port.
 
 That's enough for the users of this project to understand the solution, for people who care about the implementation, you can go ahead.
 
@@ -16,9 +16,9 @@ How to achieve that?
 ----
 Here are our solution in a tecnical way:<br>
 Set up:<br>
-A mediator run on a machine with open IP, which can be accessed both by client machine and server machine.
-On the client side (same LAN or machine), run a stub program (as a virtual server), real client connect virtual server.
-On the server side (same LAN or machine), run a stub program (as a virtual client), virtual client connect to the real server
+A <B>mediator</B> program run on a machine with open IP, which can be accessed both by client machine and server machine.
+On the client side (same LAN or machine), run a <B>stub</B> program (as a virtual server), real client connect virtual server.
+On the server side (same LAN or machine), run a <B>stub</B> program (as a virtual client), virtual client connect to the real server
 both stub program build the connections to mediator.
 
 Run time:<br>
@@ -31,11 +31,11 @@ All traffic go through the mediator as a proxy, a burden for the proxy server, w
 How to use?
 ----
 Can use the project as a standalone application or be embed in your java application.<BR>
-Refer to the sample application and unit tests.
+Refer to the sample application and unit tests.<BR>
 
 Features:
 ----
 Support several stubs connect to the same mediator.<BR>
 Support configuring virtual port mappings on the fly.<BR>
 Support SSL connections between stubs and mediator. <BR>
-Support another simple solution for simple network environment, only one component is needed, the Proxy! It must be able to access to the real server directly. <BR>
+Support another simple solution for simple network environment, only one component is needed, the <B>proxy</B> program! It must be able to access to the real server directly. <BR>
