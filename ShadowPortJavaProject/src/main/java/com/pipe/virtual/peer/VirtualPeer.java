@@ -25,6 +25,8 @@ import org.jboss.netty.channel.ChannelStateEvent;
 import org.jboss.netty.channel.ChildChannelStateEvent;
 import org.jboss.netty.channel.MessageEvent;
 import org.jboss.netty.channel.SimpleChannelUpstreamHandler;
+import org.jboss.netty.channel.group.ChannelGroup;
+import org.jboss.netty.channel.group.DefaultChannelGroup;
 import org.jboss.netty.channel.socket.nio.NioClientSocketChannelFactory;
 import org.jboss.netty.channel.socket.nio.NioServerSocketChannelFactory;
 import org.jboss.netty.handler.ssl.SslHandler;
@@ -41,8 +43,9 @@ import com.pipe.common.net.message.JoinResponse;
 import com.pipe.common.net.message.OpenVirtualPortMessage;
 import com.pipe.common.net.ssl.PipeSslContextFactory;
 import com.pipe.common.service.PeerType;
+import com.pipe.common.service.Service;
 
-public class VirtualPeer {
+public class VirtualPeer implements Service{
 
 	private static final String SSL_HANDLER_NAME = "ssl";
 
@@ -63,6 +66,8 @@ public class VirtualPeer {
 	private ServerBootstrap serverBootstrap;
 
 	private Channel signalChannel;
+	
+	private ChannelGroup allChannelInGroup;
 
 	public VirtualPeer(String id, String mediatorHost, int mediatorPort) {
 		super();
@@ -71,10 +76,10 @@ public class VirtualPeer {
 		this.mediatorPort = mediatorPort;
 	}
 
-	private List<ChannelHolder> connectionsPool = new ArrayList<ChannelHolder>();
+	private List<ChannelHolder> dataConnectionsPool = new ArrayList<ChannelHolder>();
 
 	protected ChannelHolder getHolderByID(String connectionId) {
-		for (ChannelHolder holder : connectionsPool) {
+		for (ChannelHolder holder : dataConnectionsPool) {
 			if (holder.getConnectionId().equals(connectionId)) {
 				return holder;
 			}
@@ -83,7 +88,7 @@ public class VirtualPeer {
 	}
 
 	protected ChannelHolder getHolderByDataChannel(Channel dataChannel) {
-		for (ChannelHolder holder : connectionsPool) {
+		for (ChannelHolder holder : dataConnectionsPool) {
 			if (holder.getChannel() == dataChannel) {
 				return holder;
 			}
@@ -92,7 +97,7 @@ public class VirtualPeer {
 	}
 
 	protected ChannelHolder getHolderByPipedChannel(Channel pipedChannel) {
-		for (ChannelHolder holder : connectionsPool) {
+		for (ChannelHolder holder : dataConnectionsPool) {
 			if (holder.getPipedChannel() == pipedChannel) {
 				return holder;
 			}
@@ -101,7 +106,7 @@ public class VirtualPeer {
 	}
 
 	protected ChannelHolder getFreeChannel() {
-		for (ChannelHolder holder : connectionsPool) {
+		for (ChannelHolder holder : dataConnectionsPool) {
 			if (holder.getPipedChannel() == null) {
 				logger.info("!rent channel:" + holder.getConnectionId());
 				return holder;
@@ -115,13 +120,16 @@ public class VirtualPeer {
 
 	@Override
 	public String toString() {
-		return super.toString() + "-" + id + "\n" + connectionsPool;
+		return super.toString() + "-" + id + "\n" + dataConnectionsPool;
 	}
 
 	private ExecutorService executor;
 
-	public void start() {
+	@Override
+	public VirtualPeer start() {
 
+		allChannelInGroup = new DefaultChannelGroup();
+		
 		// Configure the bootstrap.
 		executor = Executors.newCachedThreadPool();
 
@@ -153,6 +161,8 @@ public class VirtualPeer {
 		toMediatorFuture.awaitUninterruptibly();
 
 		signalChannel = toMediatorFuture.getChannel();
+		allChannelInGroup.add(signalChannel);
+
 		ChannelPipeline pipeline = signalChannel.getPipeline();
 
 		Utils.addCodec(pipeline);
@@ -193,6 +203,8 @@ public class VirtualPeer {
 
 		JoinRequest req = new JoinRequest(id, getPeerType());
 		sendMessage(signalChannel, req);
+		
+		return this;
 
 	}
 
@@ -228,7 +240,7 @@ public class VirtualPeer {
 						sendMessage(channel, new DataConnectionRegisterMessage(joinResponse.getDataConnectionKey(),
 								connectionId));
 
-						connectionsPool.add(new ChannelHolder(connectionId, channel));
+						dataConnectionsPool.add(new ChannelHolder(connectionId, channel));
 					} else {
 						logger.error("failed to connect to " + remoteAddress);
 					}
@@ -266,10 +278,13 @@ public class VirtualPeer {
 	}
 
 	protected void addDectectConnectionCreatedHandler(ChannelPipeline pipeline) {
+		//TODO for server only, do nothing
 		pipeline.addLast("connection_open_intercept", new SimpleChannelUpstreamHandler() {
 
 			@Override
 			public void channelConnected(ChannelHandlerContext ctx, ChannelStateEvent e) throws Exception {
+				
+				allChannelInGroup.add(ctx.getChannel());
 
 				if (usingSSL) {
 					// Get the SslHandler in the current pipeline.
@@ -344,24 +359,34 @@ public class VirtualPeer {
 		});
 	}
 
-	public void stop() {
-		if (signalChannel.isConnected()) {
-			ChannelFuture closeFuture = signalChannel.close();
-			closeFuture.awaitUninterruptibly(1000);
+	public VirtualPeer stop() {
+		if (allChannelInGroup != null) {
+			allChannelInGroup.close().awaitUninterruptibly();
 		}
 
-		for (ChannelHolder handler : connectionsPool) {
-			handler.getChannel().close();
+		for (ChannelHolder handler : dataConnectionsPool) {
+			handler.getChannel().close().awaitUninterruptibly();
 		}
 
-		connectionsPool.clear();
+		dataConnectionsPool.clear();
 
 		portMapping.clear();
+		
+		if (serverBootstrap != null){
+			serverBootstrap.releaseExternalResources();
+			serverBootstrap = null;
+		}
+		if (clientBootstrap != null){
+			clientBootstrap.releaseExternalResources();
+			clientBootstrap = null;
+		}
 
-		serverBootstrap.releaseExternalResources();
-		clientBootstrap.releaseExternalResources();
-
-		executor.shutdown();
+		if (executor != null){
+			executor.shutdownNow();
+			executor = null;
+		}
+		
+		return this;
 	}
 
 	protected SimpleChannelUpstreamHandler getRealConnectionDisconnectHandler() {
@@ -401,7 +426,9 @@ public class VirtualPeer {
 						channelHolder.setPipedChannel(null);
 
 						// notify remote part to disconnect too
-						sendMessage(signalChannel, new DataConnectionReleasedMessage(channelHolder.getConnectionId()));
+						if (signalChannel.isConnected()){
+							sendMessage(signalChannel, new DataConnectionReleasedMessage(channelHolder.getConnectionId()));
+						}
 
 						// recycle the data connection
 						dataConnectionRecycledForUsage(channelHolder.getChannel());
@@ -432,11 +459,14 @@ public class VirtualPeer {
 	}
 
 	protected void onMessage(OpenVirtualPortMessage ovpm) {
+		//TODO for client only, do nothing
 		InetSocketAddress virtualAddress = new InetSocketAddress(ovpm.getVirtualHost(), ovpm.getVirtualPort());
 
 		portMapping.put(virtualAddress, ovpm);
 
-		serverBootstrap.bind(virtualAddress);
+		Channel bind = serverBootstrap.bind(virtualAddress);
+		
+		allChannelInGroup.add(bind);
 	}
 
 	protected void addOnConnectionFromClientOpenHandler(ChannelPipeline pipeline) {
@@ -448,6 +478,8 @@ public class VirtualPeer {
 				final Channel realChannel = e.getChannel();
 
 				logger.info("channel Open : " + realChannel);
+				
+				allChannelInGroup.add(realChannel);
 
 				// stop read any message
 				realChannel.setReadable(false);

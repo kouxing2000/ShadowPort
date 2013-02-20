@@ -20,6 +20,11 @@ public class PeerHolder {
 	 * <ConnectionID, ChannelHolder>
 	 */
 	private Map<String, ChannelHolder> allDataChannels = new HashMap<String, ChannelHolder>();
+	
+	public Map<String, ChannelHolder> getAllDataChannels() {
+		return allDataChannels;
+	}
+
 	private Map<String, ChannelHolder> freeDataChannels = new HashMap<String, ChannelHolder>();
 
 	public PeerHolder(String peerID, PeerType peerType, Channel signalChannel, String dataConnectionKey) {

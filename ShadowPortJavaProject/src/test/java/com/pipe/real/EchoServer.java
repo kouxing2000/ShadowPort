@@ -25,6 +25,7 @@ import javax.net.ssl.SSLEngine;
 
 import org.jboss.netty.bootstrap.ServerBootstrap;
 import org.jboss.netty.buffer.ChannelBuffer;
+import org.jboss.netty.channel.Channel;
 import org.jboss.netty.channel.ChannelFuture;
 import org.jboss.netty.channel.ChannelFutureListener;
 import org.jboss.netty.channel.ChannelHandlerContext;
@@ -36,15 +37,18 @@ import org.jboss.netty.channel.ChildChannelStateEvent;
 import org.jboss.netty.channel.ExceptionEvent;
 import org.jboss.netty.channel.MessageEvent;
 import org.jboss.netty.channel.SimpleChannelUpstreamHandler;
+import org.jboss.netty.channel.group.ChannelGroup;
+import org.jboss.netty.channel.group.DefaultChannelGroup;
 import org.jboss.netty.channel.socket.nio.NioServerSocketChannelFactory;
 import org.jboss.netty.handler.ssl.SslHandler;
 
 import com.pipe.common.net.ssl.PipeSslContextFactory;
+import com.pipe.common.service.Service;
 
 /**
  * Echoes back any received data from a client.
  */
-public class EchoServer {
+public class EchoServer implements Service{
 
 	private static final Logger logger = Logger.getLogger(EchoServer.class.getName());
 
@@ -63,10 +67,18 @@ public class EchoServer {
 		this.usingSSL = usingSSL;
 		return this;
 	}
+	
+	private ServerBootstrap bootstrap;
+	
+	private ChannelGroup allChannelInGroup;
 
-	public void run() {
+	@Override
+	public EchoServer start() {
+		
+		allChannelInGroup = new DefaultChannelGroup();
+		
 		// Configure the server.
-		ServerBootstrap bootstrap = new ServerBootstrap(new NioServerSocketChannelFactory(
+		bootstrap = new ServerBootstrap(new NioServerSocketChannelFactory(
 				Executors.newCachedThreadPool(), Executors.newCachedThreadPool()));
 
 		// Set up the pipeline factory.
@@ -87,6 +99,8 @@ public class EchoServer {
 					@Override
 					public void channelConnected(ChannelHandlerContext ctx, ChannelStateEvent e) throws Exception {
 
+						allChannelInGroup.add(ctx.getChannel());
+						
 						if (usingSSL) {
 							// Get the SslHandler in the current pipeline.
 							// We added it in SecureChatPipelineFactory.
@@ -143,7 +157,27 @@ public class EchoServer {
 		});
 
 		// Bind and start to accept incoming connections.
-		bootstrap.bind(new InetSocketAddress(host, port));
+		Channel bindChannel = bootstrap.bind(new InetSocketAddress(host, port));
+		
+		allChannelInGroup.add(bindChannel);
+		
+		return this;
+	}
+	
+	@Override
+	public EchoServer stop(){
+		
+		if (allChannelInGroup != null){
+			allChannelInGroup.close().awaitUninterruptibly();
+			allChannelInGroup = null;
+		}
+		// Shut down thread pools to exit.
+		if (bootstrap != null){
+			bootstrap.releaseExternalResources();
+			bootstrap = null;
+		}
+		
+		return this;
 	}
 
 	public static void main(String[] args) throws Exception {
@@ -156,6 +190,6 @@ public class EchoServer {
 			host = "localhost";
 			port = 8080;
 		}
-		new EchoServer(host, port).run();
+		new EchoServer(host, port).start();
 	}
 }

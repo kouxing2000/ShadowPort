@@ -40,6 +40,7 @@ import org.jboss.netty.channel.socket.nio.NioClientSocketChannelFactory;
 import org.jboss.netty.handler.ssl.SslHandler;
 
 import com.pipe.common.net.ssl.PipeSslContextFactory;
+import com.pipe.common.service.Service;
 
 /**
  * Sends one message when a connection is open and echoes back any received data
@@ -47,7 +48,7 @@ import com.pipe.common.net.ssl.PipeSslContextFactory;
  * between the echo client and server by sending the first message to the
  * server.
  */
-public class EchoClient {
+public class EchoClient implements Service {
 
 	private static final Logger logger = Logger.getLogger(EchoClient.class.getName());
 
@@ -55,6 +56,16 @@ public class EchoClient {
 	private final int port;
 	private final int firstMessageSize;
 	private final ChannelBuffer firstMessage;
+	private int totalSendNum = 20;
+
+	public EchoClient setTotalSendNum(int totalSendNum) {
+		this.totalSendNum = totalSendNum;
+		return this;
+	}
+
+	public int getTotalSendNum() {
+		return totalSendNum;
+	}
 
 	public EchoClient(String host, int port, int firstMessageSize) {
 		this.host = host;
@@ -72,10 +83,26 @@ public class EchoClient {
 		this.usingSSL = usingSSL;
 		return this;
 	}
+	
+	private int sendCounter = 0;
+	
+	private boolean success = false;
 
-	public void run() {
+	public boolean isSuccess() {
+		return success;
+	}
+	
+	private ClientBootstrap bootstrap;
+
+	@Override
+	public EchoClient start() {
+		
+		sendCounter = 0;
+		
+		success = false;
+				
 		// Configure the client.
-		ClientBootstrap bootstrap = new ClientBootstrap(new NioClientSocketChannelFactory(
+		bootstrap = new ClientBootstrap(new NioClientSocketChannelFactory(
 				Executors.newCachedThreadPool(), Executors.newCachedThreadPool()));
 
 		// Set up the pipeline factory.
@@ -129,6 +156,7 @@ public class EchoClient {
 						// send anything here
 						// because the firstMessage's capacity is 0.
 						e.getChannel().write(firstMessage);
+						sendCounter++;
 						startTime = System.currentTimeMillis();
 						System.out.println(ctx.getChannel() + " send first message " + firstMessage);
 					}
@@ -154,8 +182,21 @@ public class EchoClient {
 							} catch (InterruptedException e1) {
 								e1.printStackTrace();
 							}
+							
+							if (sendCounter >= totalSendNum){
+								
+								logger.info("test success!");
+								
+								success = true;
+								
+								ctx.getChannel().close();
+								
+							} else {
+								
+								e.getChannel().write(e.getMessage());
+								sendCounter++;
+							}
 
-							e.getChannel().write(e.getMessage());
 							startTime = System.currentTimeMillis();
 						}
 
@@ -175,11 +216,18 @@ public class EchoClient {
 		// Start the connection attempt.
 		ChannelFuture future = bootstrap.connect(new InetSocketAddress(host, port));
 
-		// Wait until the connection is closed or the connection attempt fails.
-		// future.getChannel().getCloseFuture().awaitUninterruptibly();
-
+		return this;
+	}
+	
+	@Override
+	public EchoClient stop(){
 		// Shut down thread pools to exit.
-		// bootstrap.releaseExternalResources();
+		if (bootstrap != null){
+			bootstrap.releaseExternalResources();
+			bootstrap = null;
+		}
+		
+		return this;
 	}
 
 	public static void main(String[] args) throws Exception {
@@ -199,6 +247,6 @@ public class EchoClient {
 			firstMessageSize = 256;
 		}
 
-		new EchoClient(host, port, firstMessageSize).run();
+		new EchoClient(host, port, firstMessageSize).start();
 	}
 }

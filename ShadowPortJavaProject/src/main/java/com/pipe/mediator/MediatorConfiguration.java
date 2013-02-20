@@ -6,6 +6,8 @@ import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 
+import com.google.gson.Gson;
+
 public class MediatorConfiguration implements Serializable {
 
 	/**
@@ -24,7 +26,7 @@ public class MediatorConfiguration implements Serializable {
 	private int signalPort; 
 	private String dataHost; 
 	private int dataPort; 
-	private String publicDataHost = null;
+	private String publicDataHost;
 	private int publicDataPort = -1;
 	private int minimalIdleDataConnections = 5;
 
@@ -38,6 +40,8 @@ public class MediatorConfiguration implements Serializable {
 		this.dataHost = dataHost;
 		this.dataPort = dataPort;
 	}
+	
+	private static final Gson gson = new Gson();
 
 	public MediatorConfiguration addMapping(MappingEntry entry) {
 		if (portMappings == null) {
@@ -51,27 +55,7 @@ public class MediatorConfiguration implements Serializable {
 
 	@Override
 	public String toString() {
-		StringBuilder builder = new StringBuilder();
-		builder.append("MediatorConfiguration [portMappings=");
-		builder.append(portMappings);
-		builder.append(", usingSSLForDataConnection=");
-		builder.append(usingSSLForDataConnection);
-		builder.append(", signalHost=");
-		builder.append(signalHost);
-		builder.append(", signalPort=");
-		builder.append(signalPort);
-		builder.append(", dataHost=");
-		builder.append(dataHost);
-		builder.append(", dataPort=");
-		builder.append(dataPort);
-		builder.append(", publicDataHost=");
-		builder.append(publicDataHost);
-		builder.append(", publicDataPort=");
-		builder.append(publicDataPort);
-		builder.append(", minimalIdleDataConnections=");
-		builder.append(minimalIdleDataConnections);
-		builder.append("]");
-		return builder.toString();
+		return gson.toJson(this).toString();
 	}
 
 	/**

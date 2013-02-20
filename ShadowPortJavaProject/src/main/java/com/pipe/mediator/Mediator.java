@@ -13,11 +13,15 @@ import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
+import javax.management.InstanceNotFoundException;
+import javax.management.MBeanRegistrationException;
 import javax.management.MBeanServer;
+import javax.management.MalformedObjectNameException;
 import javax.management.ObjectName;
 import javax.net.ssl.SSLEngine;
 
@@ -50,8 +54,11 @@ import com.pipe.common.net.message.JoinResponse;
 import com.pipe.common.net.message.OpenVirtualPortMessage;
 import com.pipe.common.net.ssl.PipeSslContextFactory;
 import com.pipe.common.service.PeerType;
+import com.pipe.common.service.Service;
 
-public class Mediator implements MediatorMBean {
+public class Mediator implements MediatorMBean, Service {
+	private static final String MBEAN_NAME = "com.pipe.mbeans:type=Mediator";
+
 	private static final String SSL_HANDLER_NAME = "ssl";
 
 	private static final Logger logger = LoggerFactory.getLogger(Mediator.class);
@@ -77,11 +84,11 @@ public class Mediator implements MediatorMBean {
 
 	private final MediatorConfiguration mediatorConfiguration;
 
-	private static final ScheduledExecutorService SCHEDULED_EXECUTOR_SERVICE = Executors.newScheduledThreadPool(2);
+	private ScheduledExecutorService scheduledExecutor;
 
 	public Mediator(MediatorConfiguration mc) {
 		super();
-		//TODO verify configuration items
+		// TODO verify configuration items
 		this.mediatorConfiguration = mc;
 		this.signalHost = mc.getSignalHost();
 		this.signalPort = mc.getSignalPort();
@@ -91,6 +98,7 @@ public class Mediator implements MediatorMBean {
 		this.publicDataPort = mc.getPublicDataPort();
 		this.minimalIdleDataConnections = mc.getMinimalIdleDataConnections();
 		this.usingSSLForDataConnection = mc.isUsingSSLForDataConnection();
+
 	}
 
 	/**
@@ -116,26 +124,43 @@ public class Mediator implements MediatorMBean {
 		return null;
 	}
 
-	public void start() {
+	private ServerBootstrap signalBootstrap;
+
+	private ServerBootstrap dataBootstrap;
+
+	private ExecutorService executor;
+
+	private Channel signalBindChannel;
+
+	private Channel dataBindChannel;
+	
+	private MBeanServer mBeanServer = ManagementFactory.getPlatformMBeanServer();
+	private ObjectName objectName;
+	{
+		 try {
+			objectName = new ObjectName(MBEAN_NAME);
+		} catch (Exception e) {
+		}
+	}
+
+	@Override
+	public Mediator start() {
+		scheduledExecutor = Executors.newScheduledThreadPool(2);
+		executor = Executors.newCachedThreadPool();
 
 		try {
-			MBeanServer mbs = ManagementFactory.getPlatformMBeanServer();
-
-			ObjectName name = new ObjectName("com.pipe.mbeans:type=Mediator");
-
-			mbs.registerMBean(this, name);
+			mBeanServer.registerMBean(this, objectName);
 		} catch (Exception e) {
 			e.printStackTrace();
 		}
 
 		// Configure the server.
-		NioServerSocketChannelFactory channelFactory = new NioServerSocketChannelFactory(
-				Executors.newCachedThreadPool(), Executors.newCachedThreadPool());
+		NioServerSocketChannelFactory channelFactory = new NioServerSocketChannelFactory(executor, executor);
 
-		ServerBootstrap signalBootstrap = new ServerBootstrap(channelFactory);
+		signalBootstrap = new ServerBootstrap(channelFactory);
 
 		// Set up the pipeline factory.
-		//TODO for siganl connection, force to use SSL
+		// TODO for siganl connection, force to use SSL
 		signalBootstrap.setPipelineFactory(new ChannelPipelineFactory() {
 			public ChannelPipeline getPipeline() throws Exception {
 				ChannelPipeline pipeline = Channels.pipeline();
@@ -226,9 +251,9 @@ public class Mediator implements MediatorMBean {
 		});
 
 		// Bind and start to accept incoming connections.
-		signalBootstrap.bind(new InetSocketAddress(signalHost, signalPort));
+		signalBindChannel = signalBootstrap.bind(new InetSocketAddress(signalHost, signalPort));
 
-		ServerBootstrap dataBootstrap = new ServerBootstrap(channelFactory);
+		dataBootstrap = new ServerBootstrap(channelFactory);
 
 		dataBootstrap.setPipelineFactory(new ChannelPipelineFactory() {
 			public ChannelPipeline getPipeline() throws Exception {
@@ -280,6 +305,11 @@ public class Mediator implements MediatorMBean {
 						DataConnectionRegisterMessage drm = (DataConnectionRegisterMessage) e.getMessage();
 
 						PeerHolder myPeerHolder = getPeerByConnectionKey(drm.getDataConnectionKey());
+						
+						if (myPeerHolder == null){
+							//TODO 
+							return;
+						}
 
 						ChannelHolder myChannelHolder = new ChannelHolder(drm.getConnectionId(), e.getChannel());
 
@@ -303,8 +333,9 @@ public class Mediator implements MediatorMBean {
 		});
 
 		// Bind and start to accept incoming connections.
-		dataBootstrap.bind(new InetSocketAddress(dataHost, dataPort));
+		dataBindChannel = dataBootstrap.bind(new InetSocketAddress(dataHost, dataPort));
 
+		return this;
 	}
 
 	// only used it for debug
@@ -452,7 +483,7 @@ public class Mediator implements MediatorMBean {
 
 		// wait some time for their data connections come
 
-		SCHEDULED_EXECUTOR_SERVICE.schedule(new Runnable() {
+		scheduledExecutor.schedule(new Runnable() {
 
 			@Override
 			public void run() {
@@ -605,6 +636,57 @@ public class Mediator implements MediatorMBean {
 			logger.error("connect not exist!");
 		}
 
+	}
+
+	@Override
+	public Mediator stop() {
+		
+		try {
+			mBeanServer.unregisterMBean(objectName);
+		} catch (Exception e) {
+		}
+		
+		if (signalBindChannel != null) {
+			signalBindChannel.close().awaitUninterruptibly();
+			signalBindChannel = null;
+		}
+		if (dataBindChannel != null) {
+			dataBindChannel.close().awaitUninterruptibly();
+			dataBindChannel = null;
+		}
+
+		for (PeerHolder ph : allPeers.values()) {
+			for (ChannelHolder ch : ph.getAllDataChannels().values()) {
+				ch.getChannel().close().awaitUninterruptibly();
+			}
+			ph.getSignalChannel().close().awaitUninterruptibly();
+		}
+
+		allPeers.clear();
+		
+		existPipes.clear();
+		
+		existPortMappings.clear();
+
+		if (dataBootstrap != null) {
+			dataBootstrap.releaseExternalResources();
+			dataBootstrap = null;
+		}
+		if (signalBootstrap != null) {
+			signalBootstrap.releaseExternalResources();
+			signalBootstrap = null;
+		}
+
+		if (executor != null) {
+			executor.shutdown();
+			executor = null;
+		}
+		if (scheduledExecutor != null) {
+			scheduledExecutor.shutdown();
+			scheduledExecutor = null;
+		}
+
+		return this;
 	}
 
 	public static void main(String[] args) throws Exception {

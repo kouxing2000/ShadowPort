@@ -43,7 +43,7 @@ goto START
 
 :START
 
-set exec_info="%JAVA_HOME%\bin\java" -classpath %CLASSPATH%; com.pipe.virtual.peer.VirtualPeer  %*
+set exec_info="%JAVA_HOME%\bin\java" -classpath %CLASSPATH%; com.pipe.virtual.proxy.Proxy  %*
 echo %exec_info%
 %exec_info%
 

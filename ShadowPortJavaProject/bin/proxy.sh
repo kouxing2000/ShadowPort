@@ -28,7 +28,7 @@ do
         CLASSPATH=$CLASSPATH:${LIB}/${lib}
 done
 
-exec_info="$JAVA_BIN -classpath "$CLASSPATH:" com.pipe.virtual.peer.VirtualPeer $*" 
+exec_info="$JAVA_BIN -classpath "$CLASSPATH:" com.pipe.virtual.proxy.Proxy $*" 
 
 echo $exec_info
 
